@@ -212,6 +212,8 @@ struct spdk_vhost_dev {
 	/* Context passed from transport */
 	void *ctxt;
 
+	bool is_hu_suspended;
+
 	RB_ENTRY(spdk_vhost_dev) node;
 };
 
@@ -431,6 +433,8 @@ int vhost_scsi_controller_start(const char *name);
 int vhost_dev_register(struct spdk_vhost_dev *vdev, const char *name, const char *mask_str,
 		       const struct spdk_json_val *params, const struct spdk_vhost_dev_backend *backend,
 		       const struct spdk_vhost_user_dev_backend *user_backend, bool delay);
+
+int vhost_dev_insert(struct spdk_vhost_dev *vdev);
 
 int vhost_dev_unregister(struct spdk_vhost_dev *vdev);
 

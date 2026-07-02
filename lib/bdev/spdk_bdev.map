@@ -224,6 +224,13 @@
 	spdk_bdev_zone_appendv_with_md;
 	spdk_bdev_io_get_append_location;
 
+	spdk_bdev_hu_get_bdevs_first;
+	spdk_bdev_hu_get_bdevs_last;
+	spdk_bdev_hu_set_bdevs;
+	spdk_bdev_hu_save_bdev_infos;
+	spdk_bdev_hu_fixup_inherited_bdevs;
+	spdk_bdev_hu_reconstruct_bdevs;
+
 	# Everything else
 	local: *;
 };

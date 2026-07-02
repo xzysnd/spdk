@@ -1030,6 +1030,24 @@ reactor_run(void *arg)
 			_reactors_scheduler_gather_metrics(NULL, NULL);
 		}
 
+		if (g_reactor_state == SPDK_REACTOR_STATE_HU_PAUSED) {
+			/*
+			 * Hot upgrade paused state: keep event loop alive for RPC,
+			 * but only poll the app thread (skip IO threads/pollers).
+			 * This allows rpc_primary_resume to work without external SIGUSR1.
+			 */
+			event_queue_run_batch(reactor);
+
+			TAILQ_FOREACH_SAFE(lw_thread, &reactor->threads, link, tmp) {
+				thread = spdk_thread_get_from_ctx(lw_thread);
+				if (spdk_thread_is_app_thread(thread)) {
+					spdk_thread_poll(thread, 0, reactor->tsc_last);
+				}
+			}
+
+			usleep(1000);
+			continue;
+		}
 		if (g_reactor_state != SPDK_REACTOR_STATE_RUNNING) {
 			break;
 		}
@@ -1086,6 +1104,20 @@ spdk_app_parse_core_mask(const char *mask, struct spdk_cpuset *cpumask)
 	spdk_cpuset_and(cpumask, validmask);
 
 	return 0;
+}
+
+void
+spdk_reactor_hu_pause(void)
+{
+	g_reactor_state = SPDK_REACTOR_STATE_HU_PAUSED;
+	SPDK_NOTICELOG("Reactors transitioned to HU_PAUSED state\n");
+}
+
+void
+spdk_reactor_hu_resume(void)
+{
+	g_reactor_state = SPDK_REACTOR_STATE_RUNNING;
+	SPDK_NOTICELOG("Reactors resumed to RUNNING state\n");
 }
 
 const struct spdk_cpuset *

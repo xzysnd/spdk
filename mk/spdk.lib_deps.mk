@@ -66,7 +66,7 @@ DEPDIRS-notify := log util $(JSON_LIBS)
 DEPDIRS-trace := log util $(JSON_LIBS)
 
 DEPDIRS-bdev := accel log util thread $(JSON_LIBS) notify trace dma
-DEPDIRS-event := log util thread $(JSON_LIBS) trace init
+DEPDIRS-event := log util thread $(JSON_LIBS) trace init hot_upgrade
 DEPDIRS-init := jsonrpc json log rpc thread util
 DEPDIRS-ftl := log util thread bdev json jsonrpc
 ifeq ($(CONFIG_DEBUG),y)
@@ -86,7 +86,9 @@ endif
 DEPDIRS-scsi := log util thread $(JSON_LIBS) trace bdev
 
 DEPDIRS-iscsi := log sock util conf thread $(JSON_LIBS) trace scsi
-DEPDIRS-vhost = log util thread $(JSON_LIBS) bdev scsi
+DEPDIRS-vhost = log util thread $(JSON_LIBS) bdev scsi hot_upgrade
+
+DEPDIRS-hot_upgrade := log util bdev
 
 DEPDIRS-fsdev := log thread util $(JSON_LIBS) notify
 DEPDIRS-fuse_dispatcher := log thread util fsdev

@@ -23,6 +23,18 @@ iobuf_subsystem_initialize(void)
 }
 
 static void
+iobuf_secondary_pre_init(void *arg)
+{
+	int rc;
+
+	rc = spdk_iobuf_initialize();
+	if (rc != 0) {
+		SPDK_ERRLOG("HU: iobuf_secondary_pre_init failed: %d\n", rc);
+	}
+	spdk_subsystem_secondary_pre_init_next(rc);
+}
+
+static void
 iobuf_finish_cb(void *ctx)
 {
 	spdk_subsystem_fini_next();
@@ -63,6 +75,7 @@ static struct spdk_subsystem g_subsystem_iobuf = {
 	.init = iobuf_subsystem_initialize,
 	.fini = iobuf_subsystem_finish,
 	.write_config_json = iobuf_write_config_json,
+	.secondary_pre_init = iobuf_secondary_pre_init,
 };
 
 SPDK_SUBSYSTEM_REGISTER(g_subsystem_iobuf);

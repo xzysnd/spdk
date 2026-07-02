@@ -21,6 +21,18 @@ accel_subsystem_initialize(void)
 }
 
 static void
+accel_secondary_pre_init(void *arg)
+{
+	int rc;
+
+	rc = spdk_accel_initialize();
+	if (rc != 0) {
+		SPDK_ERRLOG("HU: accel_secondary_pre_init failed: %d\n", rc);
+	}
+	spdk_subsystem_secondary_pre_init_next(rc);
+}
+
+static void
 accel_subsystem_finish_done(void *cb_arg)
 {
 	spdk_subsystem_fini_next();
@@ -37,6 +49,7 @@ static struct spdk_subsystem g_spdk_subsystem_accel = {
 	.init = accel_subsystem_initialize,
 	.fini = accel_subsystem_finish,
 	.write_config_json = spdk_accel_write_config_json,
+	.secondary_pre_init = accel_secondary_pre_init,
 };
 
 SPDK_SUBSYSTEM_REGISTER(g_spdk_subsystem_accel);

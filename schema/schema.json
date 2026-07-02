@@ -6430,6 +6430,42 @@
           "description": "Name of the AIO fsdev to delete"
         }
       ]
+    },
+    {
+      "name": "primary_exit",
+      "private": true,
+      "params": [],
+      "description": "Drain Primary IO, save hot upgrade shared state, suspend Primary reactor to HU_PAUSED state. Returns {\"status\":\"primary_suspended\",\"pid\":<pid>}."
+    },
+    {
+      "name": "secondary_init",
+      "private": true,
+      "params": [],
+      "description": "Trigger Secondary takeover: invoke subsystem secondary_takeover callbacks and full init, then transition to COMPLETE state. Returns {\"status\":\"secondary_active\"}."
+    },
+    {
+      "name": "secondary_force_reconstruct",
+      "private": true,
+      "params": [],
+      "description": "Force bdev reconstruction from saved state file (functional test RPC that bypasses the hot upgrade state machine). Returns {\"status\":\"reconstructed|partial\",\"num_bdev_infos\":N,\"rc\":N}."
+    },
+    {
+      "name": "hot_upgrade_status",
+      "private": true,
+      "params": [],
+      "description": "Query current hot upgrade state machine state. Returns {\"state\":\"<IDLE|PRIMARY_DRAINING|PRIMARY_SUSPENDED|SECONDARY_PRE_INIT_DONE|SECONDARY_TAKEOVER|COMPLETE|FAILED>\"}."
+    },
+    {
+      "name": "primary_resume",
+      "private": true,
+      "params": [],
+      "description": "Resume Primary reactor from HU_PAUSED back to RUNNING (rollback path). Returns {\"status\":\"primary_resumed\"}."
+    },
+    {
+      "name": "hot_upgrade_get_timeline",
+      "private": true,
+      "params": [],
+      "description": "Retrieve TSC timeline of the last hot upgrade cycle. Returns tsc_* fields plus total_io_interruption_ms."
     }
   ]
 }

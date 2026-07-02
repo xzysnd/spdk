@@ -12,6 +12,8 @@
 #include "spdk/assert.h"
 #include "spdk/env.h"
 #include "spdk/init.h"
+#include "spdk/hot_upgrade.h"
+#include "spdk/hot_upgrade_shared.h"
 #include "spdk/log.h"
 #include "spdk/thread.h"
 #include "spdk/trace.h"
@@ -75,6 +77,18 @@ int
 spdk_app_get_shm_id(void)
 {
 	return g_spdk_app.shm_id;
+}
+
+uint64_t
+spdk_app_get_base_virtaddr(void)
+{
+	return g_default_opts.base_virtaddr;
+}
+
+const char *
+spdk_app_get_rpc_addr(void)
+{
+	return g_spdk_app.rpc_addr;
 }
 
 /* append one empty option to indicate the end of the array */
@@ -698,9 +712,17 @@ spdk_app_setup_trace(struct spdk_app_opts *opts)
 	return 0;
 }
 
+static void secondary_bootstrap_fn(void *arg1);
+
 static void
 bootstrap_fn(void *arg1)
 {
+	if (!spdk_process_is_primary()) {
+		SPDK_NOTICELOG("Secondary process: skipping full subsystem init, running pre-init\n");
+		spdk_thread_send_msg(spdk_thread_get_app_thread(), secondary_bootstrap_fn, NULL);
+		return;
+	}
+
 	spdk_rpc_set_allowlist(g_spdk_app.rpc_allowlist);
 
 	if (g_spdk_app.json_data) {
@@ -972,6 +994,7 @@ spdk_app_start(struct spdk_app_opts *opts_user, spdk_msg_fn start_fn,
 
 	/* Calculate mempool size now that the env layer has configured the core count
 	 * for the application */
+	spdk_hot_upgrade_init();
 	calculate_mempool_size(opts, opts_user);
 
 	spdk_log_open(opts->log);
@@ -1701,3 +1724,131 @@ rpc_framework_enable_cpumask_locks(struct spdk_jsonrpc_request *request,
 }
 SPDK_RPC_REGISTER("framework_enable_cpumask_locks", rpc_framework_enable_cpumask_locks,
 		  SPDK_RPC_STARTUP | SPDK_RPC_RUNTIME)
+
+
+static void
+secondary_bootstrap_fn(void *arg1)
+{
+	struct spdk_rpc_opts rpc_opts = {};
+	int rc;
+
+	/* Initialize RPC server on the app thread (required by spdk_rpc_initialize assertion) */
+	rpc_opts.size = SPDK_SIZEOF(&rpc_opts, log_level);
+	rc = spdk_rpc_initialize(g_spdk_app.rpc_addr, &rpc_opts);
+	if (rc != 0) {
+		SPDK_ERRLOG("Secondary RPC initialize failed: %d\n", rc);
+		spdk_app_stop(rc);
+		return;
+	}
+	spdk_rpc_set_state(SPDK_RPC_RUNTIME);
+	SPDK_NOTICELOG("Secondary RPC server started at %s\n", g_spdk_app.rpc_addr);
+
+	/* Run subsystem secondary pre-init (deferred to takeover phase — state file
+	 * not yet saved by Primary during parallel startup). */
+	spdk_hot_upgrade_set_state(SPDK_HU_SECONDARY_PRE_INIT);
+	spdk_hot_upgrade_set_state(SPDK_HU_SECONDARY_PRE_INIT_DONE);
+	SPDK_NOTICELOG("Secondary pre-init done (lightweight, state loading deferred to takeover)\n");
+}
+
+int
+spdk_app_secondary_pre_init(struct spdk_app_opts *opts)
+{
+	int rc;
+	struct spdk_cpuset tmp_cpumask = {};
+
+	SPDK_NOTICELOG("Starting SPDK secondary pre-initialization\n");
+	spdk_hot_upgrade_set_process_role(false);
+	spdk_hot_upgrade_init();
+	spdk_hot_upgrade_set_state(SPDK_HU_SECONDARY_PRE_INIT);
+
+	/* Connect to IPC socket (optional in parallel flow — Primary may not
+	 * have created it yet during pre_init; it will be available at takeover). */
+	rc = spdk_hot_upgrade_connect_ipc_sock();
+	if (rc < 0) {
+		SPDK_WARNLOG("IPC connect deferred (non-fatal in parallel flow): %d\n", rc);
+	}
+
+	/* Load shared state file (optional in parallel flow — Primary writes it
+	 * during primary_exit. If unavailable, fall back to CLI params for
+	 * base_virtaddr and reactor_mask. State file will be re-loaded by
+	 * bdev_secondary_takeover during the takeover phase.) */
+	struct spdk_hot_upgrade_shared_state *state;
+	rc = spdk_hot_upgrade_state_load(&state);
+	if (rc == 0) {
+		opts->base_virtaddr = state->base_virtaddr;
+		if (!(opts->lcore_map || opts->reactor_mask)) {
+			opts->reactor_mask = spdk_cpuset_fmt(&state->core_mask);
+		}
+	} else {
+		SPDK_WARNLOG("State file not available (using CLI params): %d\n", rc);
+	}
+
+	/* Initialize DPDK env (connects to Primary's shared memory via shm_id + proc-type=auto) */
+	rc = app_setup_env(opts);
+	if (rc != 0) {
+		SPDK_ERRLOG("Env init failed: %d\n", rc);
+		goto err_unmap;
+	}
+
+	/* Calculate msg_mempool_size if not set (spdk_app_start does this
+	 * via calculate_mempool_size, which the secondary does not call). */
+	if (opts->msg_mempool_size == 0) {
+		opts->msg_mempool_size = SPDK_DEFAULT_MSG_MEMPOOL_SIZE;
+	}
+
+	rc = spdk_reactors_init(opts->msg_mempool_size);
+	if (rc != 0) {
+		SPDK_ERRLOG("Reactor init failed: %d\n", rc);
+		goto err_unmap;
+	}
+
+	/* Populate g_spdk_app with secondary-specific info needed by RPC init */
+	g_spdk_app.shm_id = opts->shm_id;
+	if (opts->rpc_addr) {
+		g_spdk_app.rpc_addr = opts->rpc_addr;
+	} else {
+		SPDK_ERRLOG("Secondary process requires -r <rpc_addr>\n");
+		rc = -EINVAL;
+		goto err_unmap;
+	}
+
+	/* Create app thread (required for RPC server — spdk_rpc_initialize asserts is_app_thread) */
+	spdk_cpuset_set_cpu(&tmp_cpumask, spdk_env_get_current_core(), true);
+	spdk_thread_create("app_thread", &tmp_cpumask);
+	if (!spdk_thread_get_app_thread()) {
+		SPDK_ERRLOG("Unable to create app thread for secondary\n");
+		rc = -ENOMEM;
+		goto err_unmap;
+	}
+
+	/*
+	 * Send bootstrap message to app thread. This will execute once
+	 * spdk_reactors_start() begins the reactor loop (same pattern as Primary).
+	 * The bootstrap function will: start RPC server → subsystem pre-init →
+	 * set SECONDARY_PRE_INIT_DONE state.
+	 */
+	spdk_thread_send_msg(spdk_thread_get_app_thread(), secondary_bootstrap_fn, NULL);
+
+	return 0;
+
+err_unmap:
+	spdk_hot_upgrade_state_file_cleanup();
+	spdk_hot_upgrade_set_state(SPDK_HU_FAILED);
+	return rc;
+}
+
+int
+spdk_app_secondary_full_init(spdk_msg_fn start_fn, void *arg1)
+{
+	SPDK_NOTICELOG("Starting SPDK secondary takeover\n");
+	/* Resume reactors to RUNNING state. Subsystem takeover and hot upgrade
+	 * state transitions are driven by the caller (rpc_secondary_init via
+	 * spdk_subsystem_secondary_takeover), so this function is a placeholder
+	 * that ensures reactors are running and optionally invokes start_fn. */
+	spdk_reactor_hu_resume();
+	SPDK_NOTICELOG("Secondary takeover complete\n");
+	if (start_fn) {
+		start_fn(arg1);
+	}
+	return 0;
+}

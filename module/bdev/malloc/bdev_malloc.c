@@ -266,12 +266,35 @@ bdev_malloc_get_ctx_size(void)
 	return sizeof(struct malloc_task);
 }
 
+static int
+malloc_secondary_reconstruct(const char *name, uint32_t block_size,
+			     uint64_t num_blocks)
+{
+	struct malloc_bdev_opts opts = {};
+	struct spdk_bdev *bdev;
+	int rc;
+
+	opts.name = (char *)name;
+	opts.num_blocks = num_blocks;
+	opts.block_size = block_size;
+	opts.physical_block_size = block_size;
+
+	rc = create_malloc_disk(&bdev, &opts);
+	if (rc) {
+		SPDK_ERRLOG("HU: failed to reconstruct malloc bdev '%s': %d\n", name, rc);
+	}
+	return rc;
+}
+
+static const struct spdk_bdev_fn_table malloc_fn_table;
 static struct spdk_bdev_module malloc_if = {
 	.name = "malloc",
 	.module_init = bdev_malloc_initialize,
 	.module_fini = bdev_malloc_deinitialize,
 	.config_json = bdev_malloc_config_json,
 	.get_ctx_size = bdev_malloc_get_ctx_size,
+	.fn_table = &malloc_fn_table,
+	.secondary_reconstruct = malloc_secondary_reconstruct,
 
 };
 

@@ -171,6 +171,15 @@ vhost_dev_register(struct spdk_vhost_dev *vdev, const char *name, const char *ma
 }
 
 int
+vhost_dev_insert(struct spdk_vhost_dev *vdev)
+{
+	spdk_vhost_lock();
+	RB_INSERT(vhost_dev_name_tree, &g_vhost_devices, vdev);
+	spdk_vhost_unlock();
+	return 0;
+}
+
+int
 vhost_dev_unregister(struct spdk_vhost_dev *vdev)
 {
 	int rc;

@@ -377,6 +377,40 @@ bool spdk_framework_context_switch_monitor_enabled(void);
  */
 int spdk_app_setup_trace(struct spdk_app_opts *opts);
 
+/**
+ * Pre-initialize a secondary SPDK process for hot upgrade.
+ * Initializes DPDK in secondary mode, starts RPC server, and transitions
+ * to SECONDARY_PRE_INIT_DONE state. Does not run full subsystem init.
+ */
+int spdk_app_secondary_pre_init(struct spdk_app_opts *opts);
+
+/**
+ * Complete the secondary process takeover after hot upgrade.
+ * Called via the secondary_init RPC to fully initialize the secondary process.
+ */
+int spdk_app_secondary_full_init(spdk_msg_fn start_fn, void *arg1);
+
+/**
+ * Transition all reactors to HU_PAUSED state for hot upgrade.
+ * Only polls the app thread (RPC), skipping IO threads.
+ */
+void spdk_reactor_hu_pause(void);
+
+/**
+ * Resume all reactors from HU_PAUSED state back to RUNNING.
+ */
+void spdk_reactor_hu_resume(void);
+
+/**
+ * Get the DPDK base virtual address (for secondary process shared memory mapping).
+ */
+uint64_t spdk_app_get_base_virtaddr(void);
+
+/**
+ * Get the current RPC socket address.
+ */
+const char *spdk_app_get_rpc_addr(void);
+
 #ifdef __cplusplus
 }
 #endif
