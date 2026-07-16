@@ -28,6 +28,7 @@
 #include "bdev_internal.h"
 #include "spdk_internal/trace_defs.h"
 #include "spdk_internal/assert.h"
+#include "spdk/hot_upgrade_shared.h"
 
 #ifdef SPDK_CONFIG_VTUNE
 #include "ittnotify.h"
@@ -8521,6 +8522,7 @@ bdev_register(struct spdk_bdev *bdev)
 	bdev->internal.qd_poll_in_progress = false;
 	bdev->internal.period = 0;
 	bdev->internal.new_period = 0;
+
 	bdev->internal.trace_id = spdk_trace_register_owner(OWNER_TYPE_BDEV, bdev_name);
 
 	/*
@@ -11547,3 +11549,149 @@ bdev_trace(void)
 	spdk_trace_tpoint_register_relation(TRACE_BDEV_RAID_IO_DONE, OBJECT_BDEV_IO, 0);
 }
 SPDK_TRACE_REGISTER_FN(bdev_trace, "bdev", TRACE_GROUP_BDEV)
+
+uint64_t
+spdk_bdev_hu_get_bdevs_first(void)
+{
+	return (uint64_t)(uintptr_t)TAILQ_FIRST(&g_bdev_mgr.bdevs);
+}
+
+uint64_t
+spdk_bdev_hu_get_bdevs_last(void)
+{
+	return (uint64_t)(uintptr_t)g_bdev_mgr.bdevs.tqh_last;
+}
+
+void
+spdk_bdev_hu_set_bdevs(uint64_t first, uint64_t last)
+{
+	g_bdev_mgr.bdevs.tqh_first = (struct spdk_bdev *)(uintptr_t)first;
+	g_bdev_mgr.bdevs.tqh_last = (struct spdk_bdev **)(uintptr_t)last;
+}
+
+int
+spdk_bdev_hu_save_bdev_infos(struct spdk_hu_bdev_info *infos, uint32_t max_count,
+			     uint32_t *count)
+{
+	struct spdk_bdev *bdev;
+	uint32_t n = 0;
+
+	TAILQ_FOREACH(bdev, &g_bdev_mgr.bdevs, internal.link) {
+		if (n >= max_count) {
+			SPDK_ERRLOG("bdev count exceeds max %u\n", max_count);
+			return -ENOSPC;
+		}
+		infos[n].bdev_addr = (uint64_t)(uintptr_t)bdev;
+		if (bdev->module && bdev->module->name) {
+			snprintf(infos[n].module_name, SPDK_HU_NAME_LEN, "%s", bdev->module->name);
+		} else {
+			infos[n].module_name[0] = '\0';
+		}
+		if (bdev->name) {
+			snprintf(infos[n].bdev_name, SPDK_HU_NAME_LEN, "%s", bdev->name);
+		} else {
+			infos[n].bdev_name[0] = '\0';
+		}
+		infos[n].block_size = bdev->blocklen;
+		infos[n].num_blocks = bdev->blockcnt;
+		n++;
+	}
+	*count = n;
+	return 0;
+}
+
+void
+spdk_bdev_hu_fixup_inherited_bdevs(struct spdk_hu_bdev_info *infos, uint32_t count)
+{
+	struct spdk_bdev *bdev;
+	struct spdk_bdev_module *module;
+	uint32_t i;
+
+	TAILQ_FOREACH(bdev, &g_bdev_mgr.bdevs, internal.link) {
+		for (i = 0; i < count; i++) {
+			if ((uint64_t)(uintptr_t)bdev != infos[i].bdev_addr) {
+				continue;
+			}
+			module = NULL;
+			TAILQ_FOREACH(module, &g_bdev_mgr.bdev_modules, internal.tailq) {
+				if (module->name && strcmp(module->name, infos[i].module_name) == 0) {
+					bdev->module = module;
+					break;
+				}
+			}
+			if (module == NULL) {
+				SPDK_WARNLOG("HU: module '%s' not found for inherited bdev %p\n",
+					     infos[i].module_name, bdev);
+				break;
+			}
+			bdev->fn_table = module->fn_table;
+			/* Clear aliases TAILQ: alias objects are in Primary private heap (calloc),
+			 * not in DPDK shared hugepages. Their pointers are invalid in Secondary. */
+			TAILQ_INIT(&bdev->aliases);
+			/* Clear qos pointer: same reason, qos object is in private heap. */
+			bdev->internal.qos = NULL;
+			/* Re-strdup bdev->name: original pointer was on Primary's private heap.
+			 * Also rebuild g_bdev_mgr.bdev_names RB tree so spdk_bdev_get_by_name
+			 * works (required by vhost device rebuild and other lookups). */
+			if (infos[i].bdev_name[0] != '\0') {
+				bdev->name = strdup(infos[i].bdev_name);
+				bdev->internal.bdev_name.name = strdup(infos[i].bdev_name);
+				bdev->internal.bdev_name.bdev = bdev;
+				spdk_spin_lock(&g_bdev_mgr.spinlock);
+				RB_INSERT(bdev_name_tree, &g_bdev_mgr.bdev_names,
+					  &bdev->internal.bdev_name);
+				spdk_spin_unlock(&g_bdev_mgr.spinlock);
+			}
+			SPDK_NOTICELOG("HU: fixup bdev %p name=%s module=%s fn_table=%p\n",
+			       bdev, infos[i].bdev_name, infos[i].module_name,
+			       (void *)module->fn_table);
+			break;
+		}
+	}
+}
+
+int
+spdk_bdev_hu_reconstruct_bdevs(struct spdk_hu_bdev_info *infos, uint32_t count)
+{
+	struct spdk_bdev_module *module;
+	uint32_t i;
+	int rc, errors = 0;
+
+	for (i = 0; i < count; i++) {
+		if (infos[i].bdev_name[0] == '\0') {
+			SPDK_WARNLOG("HU: skip bdev %u (no name)\n", i);
+			continue;
+		}
+		module = NULL;
+		TAILQ_FOREACH(module, &g_bdev_mgr.bdev_modules, internal.tailq) {
+			if (module->name && strcmp(module->name, infos[i].module_name) == 0) {
+				break;
+			}
+		}
+		if (module == NULL) {
+			SPDK_ERRLOG("HU: module '%s' not found for bdev '%s'\n",
+				    infos[i].module_name, infos[i].bdev_name);
+			errors++;
+			continue;
+		}
+		if (module->secondary_reconstruct == NULL) {
+			SPDK_ERRLOG("HU: module '%s' does not support secondary_reconstruct\n",
+				    infos[i].module_name);
+			errors++;
+			continue;
+		}
+		rc = module->secondary_reconstruct(infos[i].bdev_name,
+						   infos[i].block_size,
+						   infos[i].num_blocks);
+		if (rc) {
+			SPDK_ERRLOG("HU: reconstruct bdev '%s' failed: %d\n",
+				    infos[i].bdev_name, rc);
+			errors++;
+		} else {
+			SPDK_NOTICELOG("HU: reconstructed bdev '%s' (bs=%u nb=%lu)\n",
+				       infos[i].bdev_name, infos[i].block_size,
+				       infos[i].num_blocks);
+		}
+	}
+	return errors ? -1 : 0;
+}

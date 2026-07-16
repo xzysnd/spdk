@@ -30,6 +30,7 @@ enum spdk_reactor_state {
 	SPDK_REACTOR_STATE_RUNNING = 2,
 	SPDK_REACTOR_STATE_EXITING = 3,
 	SPDK_REACTOR_STATE_SHUTDOWN = 4,
+	SPDK_REACTOR_STATE_HU_PAUSED = 5,
 };
 
 struct spdk_lw_thread;

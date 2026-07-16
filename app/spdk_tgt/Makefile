@@ -26,6 +26,7 @@ SPDK_LIB_LIST += event_ublk
 endif
 ifeq ($(CONFIG_VHOST),y)
 SPDK_LIB_LIST += event_vhost_blk event_vhost_scsi
+SPDK_LIB_LIST += hot_upgrade
 endif
 ifeq ($(CONFIG_VFIO_USER),y)
 SPDK_LIB_LIST += event_vfu_tgt

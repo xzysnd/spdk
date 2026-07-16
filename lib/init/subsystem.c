@@ -257,3 +257,102 @@ subsystem_config_json(struct spdk_json_write_ctx *w, struct spdk_subsystem *subs
 		spdk_json_write_null(w);
 	}
 }
+
+/* ======== Hot Upgrade Subsystem Traversal ======== */
+
+static struct spdk_subsystem *g_hu_next_subsystem;
+static spdk_subsystem_fini_fn g_hu_init_cb_fn;
+static void *g_hu_init_cb_arg;
+static spdk_subsystem_fini_fn g_hu_fini_cb_fn;
+static void *g_hu_fini_cb_arg;
+
+static void _hu_start_traversal(spdk_subsystem_fini_fn cb_fn, void *cb_arg)
+{
+	subsystem_sort();
+	g_hu_fini_cb_fn = cb_fn;
+	g_hu_fini_cb_arg = cb_arg;
+	g_hu_next_subsystem = TAILQ_FIRST(&g_subsystems);
+}
+
+void spdk_subsystem_primary_drain_io(spdk_subsystem_fini_fn cb_fn, void *cb_arg) {
+	_hu_start_traversal(cb_fn, cb_arg);
+	while (g_hu_next_subsystem) {
+		struct spdk_subsystem *s = g_hu_next_subsystem;
+		g_hu_next_subsystem = TAILQ_NEXT(s, tailq);
+		if (s->primary_drain_io) { s->primary_drain_io(cb_arg); return; }
+	}
+	if (cb_fn) { cb_fn(cb_arg); g_hu_fini_cb_fn = NULL; g_hu_fini_cb_arg = NULL; }
+}
+
+void spdk_subsystem_primary_drain_io_next(int rc) {
+	if (rc != 0) { SPDK_ERRLOG("drain_io failed rc=%d\n", rc); if (g_hu_fini_cb_fn) { g_hu_fini_cb_fn(g_hu_fini_cb_arg); g_hu_fini_cb_fn = NULL; } return; }
+	while (g_hu_next_subsystem) {
+		struct spdk_subsystem *s = g_hu_next_subsystem;
+		g_hu_next_subsystem = TAILQ_NEXT(s, tailq);
+		if (s->primary_drain_io) { s->primary_drain_io(g_hu_fini_cb_arg); return; }
+	}
+	if (g_hu_fini_cb_fn) { g_hu_fini_cb_fn(g_hu_fini_cb_arg); g_hu_fini_cb_fn = NULL; }
+}
+
+void spdk_subsystem_primary_suspend(spdk_subsystem_fini_fn cb_fn, void *cb_arg) {
+	_hu_start_traversal(cb_fn, cb_arg);
+	while (g_hu_next_subsystem) {
+		struct spdk_subsystem *s = g_hu_next_subsystem;
+		g_hu_next_subsystem = TAILQ_NEXT(s, tailq);
+		if (s->primary_suspend) { s->primary_suspend(cb_arg); return; }
+	}
+	if (cb_fn) { cb_fn(cb_arg); g_hu_fini_cb_fn = NULL; g_hu_fini_cb_arg = NULL; }
+}
+
+void spdk_subsystem_primary_suspend_next(int rc) {
+	if (rc != 0) { SPDK_ERRLOG("suspend failed rc=%d\n", rc); if (g_hu_fini_cb_fn) { g_hu_fini_cb_fn(g_hu_fini_cb_arg); g_hu_fini_cb_fn = NULL; } return; }
+	while (g_hu_next_subsystem) {
+		struct spdk_subsystem *s = g_hu_next_subsystem;
+		g_hu_next_subsystem = TAILQ_NEXT(s, tailq);
+		if (s->primary_suspend) { s->primary_suspend(g_hu_fini_cb_arg); return; }
+	}
+	if (g_hu_fini_cb_fn) { g_hu_fini_cb_fn(g_hu_fini_cb_arg); g_hu_fini_cb_fn = NULL; }
+}
+
+void spdk_subsystem_secondary_pre_init(spdk_subsystem_fini_fn cb_fn, void *cb_arg) {
+	subsystem_sort();
+	g_hu_init_cb_fn = cb_fn;
+	g_hu_init_cb_arg = cb_arg;
+	g_hu_next_subsystem = TAILQ_FIRST(&g_subsystems);
+	while (g_hu_next_subsystem) {
+		struct spdk_subsystem *s = g_hu_next_subsystem;
+		g_hu_next_subsystem = TAILQ_NEXT(s, tailq);
+		if (s->secondary_pre_init) { s->secondary_pre_init(cb_arg); return; }
+	}
+	if (cb_fn) { cb_fn(cb_arg); g_hu_init_cb_fn = NULL; g_hu_init_cb_arg = NULL; }
+}
+
+void spdk_subsystem_secondary_pre_init_next(int rc) {
+	if (rc != 0) { SPDK_ERRLOG("pre_init failed rc=%d\n", rc); if (g_hu_init_cb_fn) { g_hu_init_cb_fn(g_hu_init_cb_arg); g_hu_init_cb_fn = NULL; } return; }
+	while (g_hu_next_subsystem) {
+		struct spdk_subsystem *s = g_hu_next_subsystem;
+		g_hu_next_subsystem = TAILQ_NEXT(s, tailq);
+		if (s->secondary_pre_init) { s->secondary_pre_init(g_hu_init_cb_arg); return; }
+	}
+	if (g_hu_init_cb_fn) { g_hu_init_cb_fn(g_hu_init_cb_arg); g_hu_init_cb_fn = NULL; }
+}
+
+void spdk_subsystem_secondary_takeover(spdk_subsystem_fini_fn cb_fn, void *cb_arg) {
+	_hu_start_traversal(cb_fn, cb_arg);
+	while (g_hu_next_subsystem) {
+		struct spdk_subsystem *s = g_hu_next_subsystem;
+		g_hu_next_subsystem = TAILQ_NEXT(s, tailq);
+		if (s->secondary_takeover) { s->secondary_takeover(cb_arg); return; }
+	}
+	if (cb_fn) { cb_fn(cb_arg); g_hu_fini_cb_fn = NULL; g_hu_fini_cb_arg = NULL; }
+}
+
+void spdk_subsystem_secondary_takeover_next(int rc) {
+	if (rc != 0) { SPDK_ERRLOG("takeover failed rc=%d\n", rc); if (g_hu_fini_cb_fn) { g_hu_fini_cb_fn(g_hu_fini_cb_arg); g_hu_fini_cb_fn = NULL; } return; }
+	while (g_hu_next_subsystem) {
+		struct spdk_subsystem *s = g_hu_next_subsystem;
+		g_hu_next_subsystem = TAILQ_NEXT(s, tailq);
+		if (s->secondary_takeover) { s->secondary_takeover(g_hu_fini_cb_arg); return; }
+	}
+	if (g_hu_fini_cb_fn) { g_hu_fini_cb_fn(g_hu_fini_cb_arg); g_hu_fini_cb_fn = NULL; }
+}

@@ -340,6 +340,16 @@ int spdk_vhost_blk_construct(const char *name, const char *cpumask, const char *
  */
 int spdk_vhost_dev_remove(struct spdk_vhost_dev *vdev);
 
+/**
+ * Save vhost-blk device info for hot upgrade. Called during Primary suspend.
+ */
+void spdk_vhost_blk_hu_save_dev_infos(void);
+
+/**
+ * Rebuild vhost-blk devices from shared state (Secondary pre_init).
+ */
+int spdk_vhost_blk_hu_rebuild_devices(void);
+
 #ifdef __cplusplus
 }
 #endif

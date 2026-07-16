@@ -2610,6 +2610,16 @@ uint32_t spdk_bdev_get_nvme_nsid(struct spdk_bdev *bdev);
  */
 enum spdk_nvme_csi spdk_bdev_get_nvme_csi(const struct spdk_bdev *bdev);
 
+/* Hot upgrade bdev sharing accessors */
+uint64_t spdk_bdev_hu_get_bdevs_first(void);
+uint64_t spdk_bdev_hu_get_bdevs_last(void);
+void spdk_bdev_hu_set_bdevs(uint64_t first, uint64_t last);
+struct spdk_hu_bdev_info;
+int spdk_bdev_hu_save_bdev_infos(struct spdk_hu_bdev_info *infos, uint32_t max_count,
+				 uint32_t *count);
+void spdk_bdev_hu_fixup_inherited_bdevs(struct spdk_hu_bdev_info *infos, uint32_t count);
+int spdk_bdev_hu_reconstruct_bdevs(struct spdk_hu_bdev_info *infos, uint32_t count);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPDK 热替换 — 架构关系图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    padding: 40px 20px;
+    min-height: 100vh;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 {
+    text-align: center;
+    font-size: 28px;
+    color: #58a6ff;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #8b949e;
+    font-size: 14px;
+    margin-bottom: 40px;
+  }
+
+  /* ===== Architecture Diagram ===== */
+  .arch-diagram {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 40px 30px;
+    margin-bottom: 30px;
+  }
+  .layer {
+    margin-bottom: 20px;
+    position: relative;
+  }
+  .layer:last-child { margin-bottom: 0; }
+  .layer-label {
+    position: absolute;
+    left: -8px;
+    top: 50%;
+    transform: translateY(-50%) rotate(-90deg);
+    font-size: 11px;
+    color: #8b949e;
+    white-space: nowrap;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .layer-content {
+    margin-left: 30px;
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .box {
+    border-radius: 8px;
+    padding: 16px 20px;
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: default;
+    position: relative;
+  }
+  .box:hover { transform: translateY(-3px); }
+
+  /* Guest VM layer */
+  .guest-vm {
+    background: linear-gradient(135deg, #1a3a5c, #1e4a6e);
+    border: 2px solid #388bfd;
+    min-width: 200px;
+  }
+  .guest-vm .title { color: #58a6ff; font-weight: 700; font-size: 15px; }
+  .guest-vm .desc { color: #8b949e; font-size: 12px; margin-top: 4px; }
+
+  /* QEMU layer */
+  .qemu {
+    background: linear-gradient(135deg, #3b1e3c, #4a2548);
+    border: 2px solid #bc8cff;
+    min-width: 200px;
+  }
+  .qemu .title { color: #bc8cff; font-weight: 700; font-size: 15px; }
+  .qemu .desc { color: #8b949e; font-size: 12px; margin-top: 4px; }
+
+  /* vhost-user layer */
+  .vhost {
+    background: linear-gradient(135deg, #2a1e3b, #352648);
+    border: 2px solid #d2a8ff;
+    min-width: 240px;
+  }
+  .vhost .title { color: #d2a8ff; font-weight: 700; font-size: 14px; }
+  .vhost .desc { color: #8b949e; font-size: 12px; margin-top: 4px; }
+
+  /* SPDK layer */
+  .spdk-layer {
+    background: rgba(56, 139, 253, 0.08);
+    border: 2px dashed #388bfd;
+    border-radius: 10px;
+    padding: 20px;
+    margin-left: 30px;
+  }
+  .spdk-header {
+    color: #58a6ff;
+    font-weight: 700;
+    font-size: 16px;
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  .spdk-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  .spdk-col {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .spdk-col.primary { border-top: 3px solid #f85149; }
+  .spdk-col.secondary { border-top: 3px solid #3fb950; }
+  .col-label {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .col-label.primary { color: #f85149; }
+  .col-label.secondary { color: #3fb950; }
+  .col-label .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    margin-left: 6px;
+  }
+  .col-label.primary .badge { background: rgba(248,81,73,0.2); color: #f85149; }
+  .col-label.secondary .badge { background: rgba(63,185,80,0.2); color: #3fb950; }
+
+  /* Subsystem boxes */
+  .subsys-box {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    text-align: left;
+  }
+  .subsys-box:last-child { margin-bottom: 0; }
+  .subsys-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: #c9d1d9;
+  }
+  .subsys-callbacks {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .cb-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: "SF Mono", monospace;
+  }
+  .cb-drain { background: rgba(248,81,73,0.15); color: #ff7b72; }
+  .cb-suspend { background: rgba(210,168,255,0.15); color: #d2a8ff; }
+  .cb-preinit { background: rgba(63,185,80,0.15); color: #3fb950; }
+  .cb-takeover { background: rgba(56,139,253,0.15); color: #58a6ff; }
+  .cb-stub { background: rgba(139,148,158,0.15); color: #8b949e; text-decoration: line-through; }
+  .cb-none { background: rgba(139,148,158,0.08); color: #484f58; }
+
+  /* bdev modules */
+  .bdev-modules {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .bdev-mod {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: "SF Mono", monospace;
+  }
+  .bdev-mod.active { background: rgba(63,185,80,0.15); color: #3fb950; border: 1px solid rgba(63,185,80,0.3); }
+  .bdev-mod.inactive { background: rgba(139,148,158,0.1); color: #8b949e; border: 1px solid #30363d; }
+
+  /* DPDK layer */
+  .dpdk {
+    background: linear-gradient(135deg, #1c2e1c, #233323);
+    border: 2px solid #3fb950;
+    min-width: 400px;
+  }
+  .dpdk .title { color: #3fb950; font-weight: 700; font-size: 15px; }
+  .dpdk .desc { color: #8b949e; font-size: 12px; margin-top: 4px; }
+
+  /* KVM / Kernel layer */
+  .kvm {
+    background: linear-gradient(135deg, #3a2a1c, #4a3526);
+    border: 2px solid #f0883e;
+    min-width: 200px;
+  }
+  .kvm .title { color: #f0883e; font-weight: 700; font-size: 15px; }
+  .kvm .desc { color: #8b949e; font-size: 12px; margin-top: 4px; }
+
+  /* Hardware layer */
+  .hardware {
+    background: linear-gradient(135deg, #2a2a2a, #3a3a3a);
+    border: 2px solid #8b949e;
+    min-width: 400px;
+  }
+  .hardware .title { color: #c9d1d9; font-weight: 700; font-size: 15px; }
+  .hardware .desc { color: #8b949e; font-size: 12px; margin-top: 4px; }
+
+  /* Arrows */
+  .arrow-down {
+    text-align: center;
+    color: #484f58;
+    font-size: 20px;
+    margin: 8px 0;
+    line-height: 1;
+  }
+  .arrow-label {
+    display: inline-block;
+    font-size: 11px;
+    color: #8b949e;
+    background: #161b22;
+    padding: 2px 10px;
+    border-radius: 4px;
+    border: 1px solid #30363d;
+    margin: 0 6px;
+  }
+
+  /* Hot upgrade flow */
+  .hu-flow {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 30px;
+    margin-bottom: 30px;
+  }
+  .hu-flow h2 {
+    color: #58a6ff;
+    font-size: 18px;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  .flow-steps {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .flow-step {
+    flex: 1;
+    min-width: 120px;
+    max-width: 150px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 12px 8px;
+    text-align: center;
+    position: relative;
+  }
+  .flow-step .step-num {
+    font-size: 10px;
+    color: #8b949e;
+    font-weight: 700;
+  }
+  .flow-step .step-name {
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 4px;
+    color: #c9d1d9;
+  }
+  .flow-step .step-desc {
+    font-size: 10px;
+    color: #8b949e;
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+  .flow-step.highlight {
+    border-color: #f85149;
+    background: rgba(248,81,73,0.08);
+  }
+  .flow-step.highlight .step-name { color: #f85149; }
+  .flow-step.success {
+    border-color: #3fb950;
+    background: rgba(63,185,80,0.08);
+  }
+  .flow-step.success .step-name { color: #3fb950; }
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    color: #484f58;
+    font-size: 16px;
+  }
+
+  /* Legend */
+  .legend {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 30px;
+  }
+  .legend h2 {
+    color: #58a6ff;
+    font-size: 18px;
+    margin-bottom: 16px;
+  }
+  .legend-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 12px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .legend-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .legend-text {
+    font-size: 12px;
+    color: #c9d1d9;
+    line-height: 1.5;
+  }
+  .legend-text strong { color: #58a6ff; }
+
+  /* Explanation section */
+  .explanation {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 30px;
+    margin-bottom: 30px;
+  }
+  .explanation h2 {
+    color: #58a6ff;
+    font-size: 18px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #30363d;
+  }
+  .explanation h3 {
+    color: #d2a8ff;
+    font-size: 15px;
+    margin: 20px 0 10px;
+  }
+  .explanation p {
+    font-size: 13px;
+    color: #c9d1d9;
+    line-height: 1.8;
+    margin-bottom: 12px;
+  }
+  .explanation ul {
+    margin-left: 20px;
+    margin-bottom: 12px;
+  }
+  .explanation li {
+    font-size: 13px;
+    color: #c9d1d9;
+    line-height: 1.8;
+  }
+  .explanation code {
+    background: #0d1117;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: "SF Mono", monospace;
+    font-size: 12px;
+    color: #79c0ff;
+  }
+  .explanation .highlight-box {
+    background: rgba(56,139,253,0.08);
+    border-left: 3px solid #388bfd;
+    padding: 12px 16px;
+    border-radius: 0 6px 6px 0;
+    margin: 12px 0;
+  }
+  .explanation .highlight-box p {
+    margin: 0;
+    font-size: 12px;
+  }
+
+  /* IO interruption indicator */
+  .io-interruption {
+    position: relative;
+    margin: 20px 0;
+    height: 32px;
+  }
+  .io-bar {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 8px;
+    border-radius: 4px;
+  }
+  .io-bar.normal {
+    left: 0;
+    right: 35%;
+    background: linear-gradient(90deg, #3fb950, #3fb950);
+  }
+  .io-bar.interrupted {
+    left: 65%;
+    right: 0;
+    background: linear-gradient(90deg, #f85149, #f85149);
+  }
+  .io-label {
+    position: absolute;
+    top: -2px;
+    font-size: 10px;
+    color: #8b949e;
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .spdk-grid { grid-template-columns: 1fr; }
+    .flow-steps { flex-direction: column; }
+    .flow-arrow { transform: rotate(90deg); justify-content: center; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>SPDK 热替换 — 架构关系图</h1>
+<p class="subtitle">SPDK Hot Upgrade vs Subsystems vs QEMU/KVM</p>
+
+<!-- ===== Main Architecture Diagram ===== -->
+<div class="arch-diagram">
+
+  <!-- Guest VM -->
+  <div class="layer">
+    <div class="layer-label">GUEST</div>
+    <div class="layer-content">
+      <div class="box guest-vm">
+        <div class="title">Guest VM (虚拟机)</div>
+        <div class="desc">运行用户工作负载<br>发起 IO 读写请求</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <span class="arrow-label">virtio-blk / virtio-scsi IO 请求</span>
+    ▼
+  </div>
+
+  <!-- QEMU -->
+  <div class="layer">
+    <div class="layer-label">USER</div>
+    <div class="layer-content">
+      <div class="box qemu">
+        <div class="title">QEMU 进程</div>
+        <div class="desc">模拟 virtio-blk/scsi 硬件<br>通过 vhost-user 协议将 IO 转发给 SPDK</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <span class="arrow-label">vhost-user 协议（Unix socket + 共享内存）</span>
+    ▼
+  </div>
+
+  <!-- vhost-user boundary -->
+  <div class="layer">
+    <div class="layer-label">IPC</div>
+    <div class="layer-content">
+      <div class="box vhost">
+        <div class="title">vhost-user 通道</div>
+        <div class="desc">SCM_RIGHTS 传递 Guest 内存 FD<br>QP/VRING 共享内存 ring buffer<br><strong>热替换时：FD + 连接状态在此迁移</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <span class="arrow-label">IO 请求到达 SPDK bdev 层</span>
+    ▼
+  </div>
+
+  <!-- SPDK Layer -->
+  <div class="layer">
+    <div class="layer-label">SPDK</div>
+    <div class="spdk-layer">
+      <div class="spdk-header">SPDK 进程层（热替换发生在这里）</div>
+      <div class="spdk-grid">
+
+        <!-- Primary -->
+        <div class="spdk-col primary">
+          <div class="col-label primary">
+            Primary 进程 <span class="badge">旧版本</span>
+          </div>
+
+          <div class="subsys-box">
+            <div class="subsys-name">vhost_blk 子系统</div>
+            <div class="subsys-callbacks">
+              <span class="cb-tag cb-drain">drain_io</span>
+              <span class="cb-tag cb-suspend">suspend (提取FD)</span>
+              <span class="cb-tag cb-preinit">pre_init (重建设备)</span>
+              <span class="cb-tag cb-takeover">takeover (接收FD)</span>
+            </div>
+          </div>
+
+          <div class="subsys-box">
+            <div class="subsys-name">vhost_scsi 子系统</div>
+            <div class="subsys-callbacks">
+              <span class="cb-tag cb-drain">drain_io</span>
+              <span class="cb-tag cb-suspend">suspend</span>
+              <span class="cb-tag cb-stub">pre_init (stub)</span>
+              <span class="cb-tag cb-takeover">takeover</span>
+            </div>
+          </div>
+
+          <div class="subsys-box">
+            <div class="subsys-name">bdev 子系统</div>
+            <div class="subsys-callbacks">
+              <span class="cb-tag cb-drain">drain_io</span>
+              <span class="cb-tag cb-suspend">suspend (保存参数)</span>
+              <span class="cb-tag cb-preinit">pre_init (spdk_bdev_initialize + 重建)</span>
+              <span class="cb-tag cb-takeover">takeover</span>
+            </div>
+            <div class="bdev-modules">
+              <span class="bdev-mod active">malloc ✓</span>
+              <span class="bdev-mod inactive">nvme</span>
+              <span class="bdev-mod inactive">aio</span>
+              <span class="bdev-mod inactive">null</span>
+            </div>
+          </div>
+
+          <div class="subsys-box">
+            <div class="subsys-name">accel 子系统</div>
+            <div class="subsys-callbacks">
+              <span class="cb-tag cb-preinit">pre_init (spdk_accel_initialize)</span>
+            </div>
+            <div style="font-size:10px;color:#8b949e;margin-top:4px;">必须先于 bdev 初始化 (g_modules_opc)</div>
+          </div>
+
+          <div class="subsys-box">
+            <div class="subsys-name">iobuf 子系统</div>
+            <div class="subsys-callbacks">
+              <span class="cb-tag cb-preinit">pre_init (spdk_iobuf_initialize)</span>
+            </div>
+            <div style="font-size:10px;color:#8b949e;margin-top:4px;">必须先于 accel 初始化 (拓扑序)</div>
+          </div>
+
+          <div style="margin-top:10px;font-size:11px;color:#f85149;">
+            ① drain IO → ② 保存状态 → ③ suspend<br>
+            <span style="color:#8b949e;">(IO 中断开始)</span>
+          </div>
+        </div>
+
+        <!-- Secondary -->
+        <div class="spdk-col secondary">
+          <div class="col-label secondary">
+            Secondary 进程 <span class="badge">新版本</span>
+          </div>
+
+          <div class="subsys-box">
+            <div class="subsys-name">iobuf 子系统</div>
+            <div class="subsys-callbacks">
+              <span class="cb-tag cb-preinit">pre_init ✓ (第1步)</span>
+            </div>
+          </div>
+
+          <div class="subsys-box">
+            <div class="subsys-name">accel 子系统</div>
+            <div class="subsys-callbacks">
+              <span class="cb-tag cb-preinit">pre_init ✓ (第2步)</span>
+            </div>
+          </div>
+
+          <div class="subsys-box">
+            <div class="subsys-name">bdev 子系统</div>
+            <div class="subsys-callbacks">
+              <span class="cb-tag cb-preinit">pre_init ✓ (第3步: bdev_initialize + reconstruct)</span>
+            </div>
+            <div class="bdev-modules">
+              <span class="bdev-mod active">malloc ✓ 重建</span>
+            </div>
+          </div>
+
+          <div class="subsys-box">
+            <div class="subsys-name">vhost_blk 子系统</div>
+            <div class="subsys-callbacks">
+              <span class="cb-tag cb-preinit">pre_init ✓ (第4步: 重建vhost设备)</span>
+              <span class="cb-tag cb-takeover">takeover ✓ (第5步: 接收FD)</span>
+            </div>
+          </div>
+
+          <div style="margin-top:10px;font-size:11px;color:#3fb950;">
+            ④ pre_init (Primary 运行时并行) →<br>
+            ⑤ takeover → ⑥ reactor 运行<br>
+            <span style="color:#8b949e;">(IO 中断结束，&lt;200ms)</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <span class="arrow-label">DPDK 多进程共享 hugepage (shm_id 相同)</span>
+    ▼
+  </div>
+
+  <!-- DPDK -->
+  <div class="layer">
+    <div class="layer-label">DPDK</div>
+    <div class="layer-content">
+      <div class="box dpdk">
+        <div class="title">DPDK 多进程框架</div>
+        <div class="desc">
+          Primary 和 Secondary 共享同一 hugepage 内存<br>
+          通过 --shm-id 连接，--base-virtaddr 保证指针一致<br>
+          <strong>热替换核心：Primary 不退出，Secondary 直接接管共享内存</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <span class="arrow-label">vfio / UIO 内核驱动</span>
+    ▼
+  </div>
+
+  <!-- KVM / Kernel -->
+  <div class="layer">
+    <div class="layer-label">KERNEL</div>
+    <div class="layer-content">
+      <div class="box kvm">
+        <div class="title">Linux Kernel + KVM</div>
+        <div class="desc">
+          KVM: 为 Guest VM 提供虚拟化<br>
+          vfio: SPDK 用户态访问硬件<br>
+          hugepages: DPDK 大页内存管理<br>
+          <strong>热替换对 Kernel 完全透明</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">▼</div>
+
+  <!-- Hardware -->
+  <div class="layer">
+    <div class="layer-label">HW</div>
+    <div class="layer-content">
+      <div class="box hardware">
+        <div class="title">物理硬件 (NVMe SSD / 内存)</div>
+        <div class="desc">热替换不涉及硬件层 — IO 路径不变，只是进程切换</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ===== Hot Upgrade Flow ===== -->
+<div class="hu-flow">
+  <h2>热替换并行流程（IO 中断 < 200ms）</h2>
+
+  <!-- IO interruption bar -->
+  <div class="io-interruption">
+    <div class="io-bar normal"></div>
+    <div class="io-bar interrupted"></div>
+    <div class="io-label" style="left:0;">Primary 正常服务 IO</div>
+    <div class="io-label" style="left:65%;color:#f85149;">IO 中断 (< 200ms)</div>
+    <div class="io-label" style="right:0;color:#3fb950;">Secondary 接管 IO</div>
+  </div>
+
+  <div class="flow-steps" style="margin-top:20px;">
+    <div class="flow-step success">
+      <div class="step-num">PHASE 0</div>
+      <div class="step-name">Primary 运行</div>
+      <div class="step-desc">Primary 正常处理 IO<br>Secondary 尚未启动</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step success">
+      <div class="step-num">PHASE 1</div>
+      <div class="step-name">Secondary 启动</div>
+      <div class="step-desc">Secondary 进程启动<br>连接 Primary 的 hugepage</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step success">
+      <div class="step-num">PHASE 2</div>
+      <div class="step-name">并行 pre_init</div>
+      <div class="step-desc">Secondary 预初始化子系统<br><strong>Primary 仍在处理 IO</strong></div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step highlight">
+      <div class="step-num">PHASE 3</div>
+      <div class="step-name">primary_exit</div>
+      <div class="step-desc">Primary drain → suspend<br><strong>IO 中断开始</strong></div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step highlight">
+      <div class="step-num">PHASE 4</div>
+      <div class="step-name">secondary_init</div>
+      <div class="step-desc">Secondary takeover<br>接收 FD + 恢复连接</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step success">
+      <div class="step-num">PHASE 5</div>
+      <div class="step-name">Secondary 运行</div>
+      <div class="step-desc">reactor 开始运行<br><strong>IO 中断结束</strong></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Legend ===== -->
+<div class="legend">
+  <h2>图例 — 子系统回调类型</h2>
+  <div class="legend-grid">
+    <div class="legend-item">
+      <div class="legend-color" style="background:rgba(248,81,73,0.3);border:1px solid #f85149;"></div>
+      <div class="legend-text"><strong>drain_io</strong> — 排空子系统正在处理的 IO</div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background:rgba(210,168,255,0.3);border:1px solid #d2a8ff;"></div>
+      <div class="legend-text"><strong>suspend</strong> — 保存子系统状态/提取 FD</div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background:rgba(63,185,80,0.3);border:1px solid #3fb950;"></div>
+      <div class="legend-text"><strong>secondary_pre_init</strong> — Secondary 并行预初始化（Primary 运行时）</div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background:rgba(56,139,253,0.3);border:1px solid #58a6ff;"></div>
+      <div class="legend-text"><strong>secondary_takeover</strong> — Secondary 接管 IO 职责</div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background:rgba(139,148,158,0.2);border:1px solid #8b949e;"></div>
+      <div class="legend-text"><strong>stub</strong> — 占位实现，未完成（划线表示）</div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background:rgba(63,185,80,0.15);border:1px solid rgba(63,185,80,0.3);"></div>
+      <div class="legend-text"><strong>active module</strong> — 已实现 secondary_reconstruct</div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background:rgba(139,148,158,0.1);border:1px solid #30363d;"></div>
+      <div class="legend-text"><strong>inactive module</strong> — 未实现重建回调</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Explanation ===== -->
+<div class="explanation">
+  <h2>详细说明</h2>
+
+  <h3>1. QEMU / KVM 与 SPDK 的关系</h3>
+  <div class="highlight-box">
+    <p>KVM 是 Linux 内核的虚拟化模块，负责 CPU 和内存虚拟化。QEMU 是用户态进程，模拟硬件设备。SPDK 是用户态存储框架，通过 vhost-user 协议为 QEMU/Guest VM 提供后端存储。</p>
+  </div>
+  <p><strong>IO 路径</strong>：Guest VM 发出 IO → QEMU virtio 设备 → vhost-user 协议 → SPDK bdev → DPDK → NVMe 硬件。</p>
+  <p><strong>SPDK 的角色</strong>：SPDK 替代了 QEMU 内部的存储后端（如 -drive file=），用用户态 + 零拷贝实现高性能 IO。QEMU 只负责模拟 virtio 硬件前端，IO 实际处理在 SPDK 进程中完成。</p>
+
+  <h3>2. 热替换与子系统的关系</h3>
+  <p>SPDK 由多个子系统组成（iobuf → accel → bdev → vhost），每个子系统在热替换中扮演不同角色：</p>
+  <ul>
+    <li><strong>iobuf</strong>：IO 缓冲池。Secondary 必须先初始化（拓扑序第 1），因为后续子系统依赖它分配 IO buffer。</li>
+    <li><strong>accel</strong>：加速框架（加密/压缩/CRC 等）。Secondary 第 2 初始化，因为 bdev_register 会解引用 <code>g_modules_opc[opcode].module</code>，如果 accel 未初始化则崩溃。</li>
+    <li><strong>bdev</strong>：块设备层。Secondary 第 3 初始化：调用 <code>spdk_bdev_initialize</code> 创建基础设施（mempool/zero buffer），然后通过 <code>secondary_reconstruct</code> 回调重建每个 bdev。</li>
+    <li><strong>vhost_blk</strong>：vhost 后端。Secondary 第 4 初始化：重建 vhost 设备结构。第 5 步 takeover：接收 Primary 传递的 Guest 内存 FD，恢复 QEMU 连接。</li>
+  </ul>
+  <div class="highlight-box">
+    <p><strong>关键点</strong>：子系统按拓扑顺序初始化（<code>subsystem_sort()</code>），保证依赖关系。Primary 运行时 Secondary 并行完成 pre_init，之后只需 primary_exit → secondary_init（takeover）即可切换，IO 中断 < 200ms。</p>
+  </div>
+
+  <h3>3. 热替换对 QEMU/KVM 的影响</h3>
+  <p><strong>对 KVM</strong>：完全透明。KVM 只管 CPU/内存虚拟化，不涉及 SPDK 进程切换。</p>
+  <p><strong>对 QEMU</strong>：几乎透明。QEMU 通过 vhost-user Unix socket 连接 SPDK，热替换时：</p>
+  <ul>
+    <li>FD 迁移：Primary 通过 SCM_RIGHTS 将 Guest 内存 FD 传给 Secondary</li>
+    <li>连接状态：vhost 的 QP/VRING 状态在共享内存中，Secondary 直接继承</li>
+    <li>QEMU 感知的只有短暂的 IO 停顿（< 200ms），然后 IO 自动恢复</li>
+  </ul>
+  <p><strong>当前限制</strong>：vhost 设备重建用 <code>ctxt=NULL</code>，vhost-user 会话（QEMU 的连接）不自动迁移 — Phase 13b 将完善。</p>
+
+  <h3>4. DPDK 多进程机制</h3>
+  <p>热替换的底层基石是 DPDK 多进程：</p>
+  <ul>
+    <li>Primary 和 Secondary 共享同一 hugepage 内存（通过 <code>--shm-id</code> 连接）</li>
+    <li>使用相同 <code>--base-virtaddr</code> 保证虚拟地址一致，bdev 指针跨进程有效</li>
+    <li>Primary 不退出、不销毁 EAL，Secondary 直接接管共享内存中的数据结构</li>
+    <li>这比传统的"停旧进程 → 启新进程"方案快 10 倍以上（3-5s → <200ms）</li>
+  </ul>
+
+</div>
+
+</div>
+</body>
+</html>

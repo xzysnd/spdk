@@ -172,6 +172,13 @@ struct spdk_subsystem {
 	 * \param w JSON write context.
 	 */
 	void (*write_config_json)(struct spdk_json_write_ctx *w);
+
+	/* Hot upgrade callbacks (optional, NULL if not supported) */
+	void (*primary_drain_io)(void *ctx);
+	void (*primary_suspend)(void *ctx);
+	void (*secondary_pre_init)(void *ctx);
+	void (*secondary_takeover)(void *ctx);
+
 	TAILQ_ENTRY(spdk_subsystem) tailq;
 };
 
@@ -212,6 +219,16 @@ void spdk_subsystem_init_next(int rc);
  * and the next subsystem may begin its teardown.
  */
 void spdk_subsystem_fini_next(void);
+
+/* Hot upgrade subsystem traversal functions */
+void spdk_subsystem_primary_drain_io(spdk_subsystem_fini_fn cb_fn, void *cb_arg);
+void spdk_subsystem_primary_drain_io_next(int rc);
+void spdk_subsystem_primary_suspend(spdk_subsystem_fini_fn cb_fn, void *cb_arg);
+void spdk_subsystem_primary_suspend_next(int rc);
+void spdk_subsystem_secondary_pre_init(spdk_subsystem_fini_fn cb_fn, void *cb_arg);
+void spdk_subsystem_secondary_pre_init_next(int rc);
+void spdk_subsystem_secondary_takeover(spdk_subsystem_fini_fn cb_fn, void *cb_arg);
+void spdk_subsystem_secondary_takeover_next(int rc);
 
 /**
  * \brief Register a new subsystem

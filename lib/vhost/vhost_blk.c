@@ -14,6 +14,7 @@
 #include "spdk/util.h"
 #include "spdk/vhost.h"
 #include "spdk/json.h"
+#include "spdk/hot_upgrade_shared.h"
 
 #include "vhost_internal.h"
 #include <rte_version.h>
@@ -1599,6 +1600,91 @@ static const struct spdk_vhost_dev_backend vhost_blk_device_backend = {
 	.set_coalescing = vhost_blk_set_coalescing,
 	.get_coalescing = vhost_blk_get_coalescing,
 };
+
+/* ===== Hot Upgrade: vhost-blk device sharing ===== */
+
+void
+spdk_vhost_blk_hu_save_dev_infos(void)
+{
+	struct spdk_hot_upgrade_shared_state *state;
+	struct spdk_vhost_dev *vdev;
+	uint32_t i = 0;
+
+	if (spdk_hot_upgrade_state_load(&state) != 0) {
+		SPDK_ERRLOG("Failed to load state for vhost info save\n");
+		return;
+	}
+
+	for (vdev = spdk_vhost_dev_next(NULL); vdev != NULL && i < SPDK_HU_MAX_VHOST_DEVS;
+	     vdev = spdk_vhost_dev_next(vdev)) {
+		if (vdev->backend->type == VHOST_BACKEND_BLK) {
+			struct spdk_vhost_blk_dev *bvdev = to_blk_dev(vdev);
+			if (bvdev && bvdev->bdev) {
+				snprintf(state->vhost_dev_infos[i].name,
+					 SPDK_HU_NAME_LEN, "%s", vdev->name);
+				snprintf(state->vhost_dev_infos[i].dev_name,
+					 SPDK_HU_NAME_LEN, "%s", bvdev->bdev->name);
+				snprintf(state->vhost_dev_infos[i].path,
+					 SPDK_HU_PATH_LEN, "%s", vdev->path);
+				state->vhost_dev_infos[i].readonly = bvdev->readonly;
+				state->vhost_dev_infos[i].transport_type = 0;
+				i++;
+			}
+		}
+	}
+	state->num_vhost_dev_infos = i;
+	SPDK_NOTICELOG("[HU] vhost_blk: saved %u device infos\n", i);
+}
+
+int
+spdk_vhost_blk_hu_rebuild_devices(void)
+{
+	struct spdk_hot_upgrade_shared_state *state;
+	uint32_t i;
+
+	if (spdk_hot_upgrade_state_load(&state) != 0) {
+		SPDK_ERRLOG("[HU] vhost_blk: failed to load state for rebuild\n");
+		return -1;
+	}
+
+	if (state->num_vhost_dev_infos == 0) {
+		SPDK_NOTICELOG("[HU] vhost_blk: no devices to rebuild\n");
+		return 0;
+	}
+
+	for (i = 0; i < state->num_vhost_dev_infos; i++) {
+		struct spdk_hu_vhost_dev_info *info = &state->vhost_dev_infos[i];
+		struct spdk_vhost_blk_dev *bvdev;
+		struct spdk_bdev *bdev;
+
+		bdev = spdk_bdev_get_by_name(info->dev_name);
+		if (bdev == NULL) {
+			SPDK_ERRLOG("[HU] vhost_blk: bdev %s not found, skip\n",
+				    info->dev_name);
+			continue;
+		}
+
+		bvdev = calloc(1, sizeof(*bvdev));
+		if (bvdev == NULL) {
+			SPDK_ERRLOG("[HU] vhost_blk: calloc failed\n");
+			continue;
+		}
+
+		bvdev->vdev.name = strdup(info->name);
+		bvdev->vdev.path = strdup(info->path);
+		bvdev->vdev.backend = &vhost_blk_device_backend;
+		bvdev->vdev.ctxt = NULL;
+		bvdev->vdev.is_hu_suspended = true;
+		bvdev->bdev = bdev;
+		bvdev->readonly = info->readonly;
+
+		vhost_dev_insert(&bvdev->vdev);
+		SPDK_NOTICELOG("[HU] vhost_blk: rebuilt device %s (bdev=%s)\n",
+			       info->name, info->dev_name);
+	}
+
+	return 0;
+}
 
 int
 virtio_blk_construct_ctrlr(struct spdk_vhost_dev *vdev, const char *address,

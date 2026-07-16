@@ -39,5 +39,12 @@
 	spdk_for_each_reactor;
 	spdk_reactor_set_interrupt_mode;
 
-	local: *;
+        spdk_app_secondary_pre_init;
+        spdk_app_secondary_full_init;
+        spdk_reactor_hu_pause;
+        spdk_reactor_hu_resume;
+        spdk_app_get_base_virtaddr;
+        spdk_app_get_rpc_addr;
+
+        local: *;
 };

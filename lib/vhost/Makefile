@@ -12,7 +12,7 @@ SO_MINOR := 0
 CFLAGS += -I.
 CFLAGS += $(ENV_CFLAGS)
 
-C_SRCS = vhost.c vhost_rpc.c vhost_scsi.c vhost_blk.c rte_vhost_user.c
+C_SRCS = vhost.c vhost_rpc.c vhost_hu.c vhost_scsi.c vhost_blk.c rte_vhost_user.c
 
 LIBNAME = vhost
 

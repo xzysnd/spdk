@@ -143,6 +143,20 @@ struct spdk_bdev_module {
 	bool async_fini_start;
 
 	/**
+	 * Hot upgrade: function table for this module's bdevs.
+	 * Secondary process uses this to fixup inherited bdevs' fn_table pointer.
+	 */
+	const struct spdk_bdev_fn_table *fn_table;
+
+	/**
+	 * Hot upgrade: reconstruct a bdev in the secondary process from saved
+	 * parameters. Returns 0 on success, negative errno on failure.
+	 * Called by bdev subsystem during secondary_pre_init for each saved bdev.
+	 */
+	int (*secondary_reconstruct)(const char *name, uint32_t block_size,
+				     uint64_t num_blocks);
+
+	/**
 	 * Fields that are used by the internal bdev subsystem. Bdev modules
 	 *  must not read or write to these fields.
 	 */

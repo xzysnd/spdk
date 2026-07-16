@@ -17,5 +17,14 @@
 	spdk_rpc_server_resume;
 	spdk_subsystem_load_config;
 
-	local: *;
+        spdk_subsystem_primary_drain_io;
+        spdk_subsystem_primary_drain_io_next;
+        spdk_subsystem_primary_suspend;
+        spdk_subsystem_primary_suspend_next;
+        spdk_subsystem_secondary_pre_init;
+        spdk_subsystem_secondary_pre_init_next;
+        spdk_subsystem_secondary_takeover;
+        spdk_subsystem_secondary_takeover_next;
+
+        local: *;
 };
