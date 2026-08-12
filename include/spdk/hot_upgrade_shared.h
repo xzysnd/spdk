@@ -139,7 +139,26 @@ struct spdk_hot_upgrade_shared_state {
 	/* RPC addresses */
 	char primary_rpc_addr[SPDK_HU_PATH_LEN];
 	char secondary_rpc_addr[SPDK_HU_PATH_LEN];
+
+	/* ===== Real-time hot upgrade status (for external process visibility) =====
+	 * Updated atomically by spdk_hot_upgrade_set_state() via msync(MS_ASYNC).
+	 * External processes can read /var/tmp/spdk_hot_upgrade_state to check
+	 * whether SPDK is currently in a hot upgrade and which phase.
+	 */
+	uint32_t hu_state;                 /* Current g_hu_state value (enum spdk_hot_upgrade_state) */
+	uint32_t hu_state_pid;             /* PID of the process that set hu_state */
+	char hu_state_name[32];            /* Human-readable state name, e.g. "PRIMARY_SUSPENDED" */
 };
+
+/**
+ * Get the pointer to the mmapped shared state.
+ *
+ * External callers can read hu_state / hu_state_name to check
+ * whether a hot upgrade is in progress.
+ *
+ * \return Pointer to shared state, or NULL if not yet initialized.
+ */
+struct spdk_hot_upgrade_shared_state *spdk_hot_upgrade_get_shared_state(void);
 
 /**
  * Save the shared state to a memory-mapped file.

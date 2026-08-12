@@ -18,6 +18,7 @@ global:
     spdk_hot_upgrade_state_save;
     spdk_hot_upgrade_state_load;
     spdk_hot_upgrade_state_file_cleanup;
+    spdk_hot_upgrade_get_shared_state;
 
 local: *;
 };

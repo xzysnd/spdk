@@ -19,7 +19,14 @@ int spdk_vhost_hu_secondary_takeover_all(void);
 
 static void
 vhost_scsi_primary_drain_io(void *arg)
-{ spdk_vhost_hu_primary_drain_all(); spdk_subsystem_primary_drain_io_next(0); }
+{
+	/*
+	 * spdk_vhost_hu_primary_drain_all() is shared between vhost_blk and
+	 * vhost_scsi. First call (from vhost_blk) starts the drain poller.
+	 * This second call finds drain done and calls next(0) immediately.
+	 */
+	spdk_vhost_hu_primary_drain_all();
+}
 
 static void
 vhost_scsi_primary_suspend(void *arg)

@@ -19,7 +19,15 @@ int spdk_vhost_hu_secondary_takeover_all(void);
 
 static void
 vhost_blk_primary_drain_io(void *arg)
-{ spdk_vhost_hu_primary_drain_all(); spdk_subsystem_primary_drain_io_next(0); }
+{
+	/*
+	 * spdk_vhost_hu_primary_drain_all() sets hu_draining flag on all
+	 * sessions and registers a drain poller. The poller calls
+	 * spdk_subsystem_primary_drain_io_next(0) when all in-flight IOs
+	 * complete (or 5s timeout). Do NOT call next(0) here.
+	 */
+	spdk_vhost_hu_primary_drain_all();
+}
 
 static void
 vhost_blk_primary_suspend(void *arg)

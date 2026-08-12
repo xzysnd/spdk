@@ -184,8 +184,6 @@ rpc_primary_exit(struct spdk_jsonrpc_request *request,
 	spdk_hot_upgrade_set_state(SPDK_HU_PRIMARY_DRAINING);
 
 	/* Start draining I/O across all subsystems */
-	/* Note: P5-02 IO drain timeout not yet implemented in POC.
-	 * In production, use spdk_thread_send_msg with delay for cancelable timeout. */
 	spdk_subsystem_primary_drain_io(primary_drain_io_done, ctx);
 }
 SPDK_RPC_REGISTER("primary_exit", rpc_primary_exit, SPDK_RPC_RUNTIME)

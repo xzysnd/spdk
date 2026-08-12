@@ -774,6 +774,11 @@ process_vq(struct spdk_vhost_scsi_session *svsession, struct spdk_vhost_virtqueu
 	uint16_t reqs_cnt, i;
 	int resubmit_cnt;
 
+	/* Hot upgrade drain: stop reading new IOs, let in-flight IOs complete */
+	if (spdk_unlikely(vsession->hu_draining)) {
+		return 0;
+	}
+
 	resubmit_cnt = submit_inflight_desc(svsession, vq);
 
 	reqs_cnt = vhost_vq_avail_ring_get(vq, reqs, SPDK_COUNTOF(reqs));

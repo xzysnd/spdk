@@ -4,10 +4,13 @@
  */
 
 #include "spdk/stdinc.h"
+#include "spdk/env.h"
 #include "spdk/hot_upgrade.h"
 #include "spdk/hot_upgrade_shared.h"
+#include "spdk/init.h"
 #include "spdk/log.h"
 #include "spdk/string.h"
+#include "spdk/thread.h"
 #include "spdk/util.h"
 #include "spdk/vhost.h"
 #include "vhost_internal.h"
@@ -352,6 +355,100 @@ spdk_vhost_session_attach_fds(struct spdk_vhost_session *vsession,
 SPDK_LOG_REGISTER_COMPONENT(vhost_hu)
 
 /*
+ * ===== In-flight IO Drain Poller =====
+ */
+
+#define HU_DRAIN_TIMEOUT_SEC 5
+
+enum hu_drain_state {
+	HU_DRAIN_IDLE = 0,
+	HU_DRAIN_IN_PROGRESS,
+	HU_DRAIN_DONE,
+};
+
+static enum hu_drain_state g_hu_drain_state = HU_DRAIN_IDLE;
+static struct spdk_poller *g_hu_drain_poller = NULL;
+static uint64_t g_hu_drain_start_tsc = 0;
+
+static int
+vhost_hu_drain_poller(void *arg)
+{
+	struct spdk_vhost_dev *vdev;
+	struct spdk_vhost_session *vsession;
+	bool all_drained = true;
+	uint64_t now = spdk_get_ticks();
+	uint64_t timeout_ticks = spdk_get_ticks_hz() * HU_DRAIN_TIMEOUT_SEC;
+
+	/* Check all virtqueues for in-flight IO */
+	for (vdev = spdk_vhost_dev_next(NULL); vdev != NULL;
+	     vdev = spdk_vhost_dev_next(vdev)) {
+		struct spdk_vhost_user_dev *user_dev = to_user_dev(vdev);
+
+		TAILQ_FOREACH(vsession, &user_dev->vsessions, tailq) {
+			uint16_t i;
+
+			if (!vsession->started) {
+				continue;
+			}
+
+			for (i = 0; i < vsession->max_queues; i++) {
+				struct spdk_vhost_virtqueue *vq = &vsession->virtqueue[i];
+
+				if (vq->vring.desc == NULL) {
+					continue; /* inactive queue */
+				}
+
+				if (vq->last_avail_idx != vq->last_used_idx) {
+					all_drained = false;
+					SPDK_DEBUGLOG(vhost,
+						      "hu: drain wait %s vq%u: "
+						      "avail=%u used=%u\n",
+						      vsession->name, i,
+						      vq->last_avail_idx,
+						      vq->last_used_idx);
+					break;
+				}
+			}
+
+			if (!all_drained) {
+				break;
+			}
+		}
+
+		if (!all_drained) {
+			break;
+		}
+	}
+
+	if (all_drained) {
+		SPDK_NOTICELOG("hu: all vhost in-flight IO drained\n");
+	} else if (now - g_hu_drain_start_tsc > timeout_ticks) {
+		SPDK_WARNLOG("hu: drain timeout (%ds), proceeding anyway\n",
+			     HU_DRAIN_TIMEOUT_SEC);
+		all_drained = true; /* force proceed after timeout */
+	}
+
+	if (all_drained) {
+		spdk_poller_unregister(&g_hu_drain_poller);
+		g_hu_drain_state = HU_DRAIN_DONE;
+
+		/* Clear hu_draining flag (Primary will be suspended next) */
+		for (vdev = spdk_vhost_dev_next(NULL); vdev != NULL;
+		     vdev = spdk_vhost_dev_next(vdev)) {
+			struct spdk_vhost_user_dev *user_dev = to_user_dev(vdev);
+
+			TAILQ_FOREACH(vsession, &user_dev->vsessions, tailq) {
+				vsession->hu_draining = false;
+			}
+		}
+
+		spdk_subsystem_primary_drain_io_next(0);
+	}
+
+	return SPDK_POLLER_BUSY;
+}
+
+/*
  * ===== Unified Entry Points for Subsystem Callbacks =====
  */
 
@@ -359,9 +456,50 @@ int
 spdk_vhost_hu_primary_drain_all(void)
 {
 	struct spdk_vhost_dev *vdev;
+	struct spdk_vhost_session *vsession;
+
+	/*
+	 * This function is called by both vhost_blk and vhost_scsi subsystems
+	 * during drain_io traversal. The first call sets hu_draining on all
+	 * sessions and registers the drain poller. The poller calls
+	 * spdk_subsystem_primary_drain_io_next(0) when all in-flight IOs
+	 * complete (or timeout). The second call (from the other vhost
+	 * subsystem) finds drain already done and immediately calls
+	 * spdk_subsystem_primary_drain_io_next(0) to advance traversal.
+	 */
+	if (g_hu_drain_state == HU_DRAIN_DONE) {
+		spdk_subsystem_primary_drain_io_next(0);
+		return 0;
+	}
+
+	if (g_hu_drain_state == HU_DRAIN_IN_PROGRESS) {
+		/* Already draining; poller will call next(0) when done */
+		return 0;
+	}
+
+	g_hu_drain_state = HU_DRAIN_IN_PROGRESS;
+	g_hu_drain_start_tsc = spdk_get_ticks();
+
+	/* Set hu_draining flag on all started sessions */
 	for (vdev = spdk_vhost_dev_next(NULL); vdev != NULL;
-	     vdev = spdk_vhost_dev_next(vdev))
-		SPDK_INFOLOG(vhost, "hu: drain %s\n", vdev->name);
+	     vdev = spdk_vhost_dev_next(vdev)) {
+		struct spdk_vhost_user_dev *user_dev = to_user_dev(vdev);
+
+		TAILQ_FOREACH(vsession, &user_dev->vsessions, tailq) {
+			if (!vsession->started) {
+				continue;
+			}
+			vsession->hu_draining = true;
+			SPDK_INFOLOG(vhost, "hu: set hu_draining on session %s\n",
+				     vsession->name);
+		}
+	}
+
+	/* Register drain poller (100us interval for fast completion) */
+	g_hu_drain_poller = SPDK_POLLER_REGISTER(vhost_hu_drain_poller, NULL, 100);
+
+	SPDK_NOTICELOG("hu: vhost drain started, waiting for in-flight IO\n");
+
 	return 0;
 }
 
@@ -369,6 +507,12 @@ int
 spdk_vhost_hu_primary_suspend_all(void)
 {
 	struct spdk_vhost_dev *vdev;
+
+	/* Reset drain state so next hot upgrade cycle starts fresh */
+	g_hu_drain_state = HU_DRAIN_IDLE;
+	g_hu_drain_poller = NULL;
+	g_hu_drain_start_tsc = 0;
+
 	for (vdev = spdk_vhost_dev_next(NULL); vdev != NULL;
 	     vdev = spdk_vhost_dev_next(vdev)) {
 		spdk_vhost_extract_mem_fds(vdev);

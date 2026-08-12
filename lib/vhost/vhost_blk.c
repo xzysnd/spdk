@@ -866,6 +866,11 @@ process_vq(struct spdk_vhost_blk_session *bvsession, struct spdk_vhost_virtqueue
 	uint16_t reqs_cnt, i;
 	int resubmit_cnt = 0;
 
+	/* Hot upgrade drain: stop reading new IOs, let in-flight IOs complete */
+	if (spdk_unlikely(vsession->hu_draining)) {
+		return 0;
+	}
+
 	resubmit_cnt = submit_inflight_desc(bvsession, vq);
 
 	reqs_cnt = vhost_vq_avail_ring_get(vq, reqs, SPDK_COUNTOF(reqs));
@@ -919,6 +924,11 @@ _vdev_vq_worker(struct spdk_vhost_virtqueue *vq)
 	struct spdk_vhost_blk_session *bvsession = to_blk_session(vsession);
 	bool packed_ring;
 	int rc = 0;
+
+	/* Hot upgrade drain: stop reading new IOs, let in-flight IOs complete */
+	if (spdk_unlikely(vsession->hu_draining)) {
+		return 0;
+	}
 
 	packed_ring = vq->packed.packed_ring;
 	if (packed_ring) {
@@ -1026,6 +1036,11 @@ _no_bdev_vdev_vq_worker(struct spdk_vhost_virtqueue *vq)
 	struct spdk_vhost_session *vsession = vq->vsession;
 	struct spdk_vhost_blk_session *bvsession = to_blk_session(vsession);
 	bool packed_ring;
+
+	/* Hot upgrade drain: stop reading new IOs, let in-flight IOs complete */
+	if (spdk_unlikely(vsession->hu_draining)) {
+		return SPDK_POLLER_IDLE;
+	}
 
 	packed_ring = vq->packed.packed_ring;
 	if (packed_ring) {

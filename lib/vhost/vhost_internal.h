@@ -130,6 +130,7 @@ struct spdk_vhost_session {
 	bool started;
 	bool starting;
 	bool needs_restart;
+	bool hu_draining; /* Hot upgrade: stop reading new IOs from avail ring */
 
 	struct rte_vhost_memory *mem;
 

@@ -102,6 +102,16 @@ spdk_hot_upgrade_set_state(enum spdk_hot_upgrade_state state)
 		       spdk_hot_upgrade_state_str(state));
 	/* C-4/C-5: Atomic store with release semantics for cross-reactor visibility */
 	__atomic_store_n(&g_hu_state, state, __ATOMIC_RELEASE);
+
+	/* Sync to shared state file for external process visibility */
+	if (g_hu_shared_state != NULL) {
+		g_hu_shared_state->hu_state = (uint32_t)state;
+		g_hu_shared_state->hu_state_pid = (uint32_t)getpid();
+		snprintf(g_hu_shared_state->hu_state_name,
+			 sizeof(g_hu_shared_state->hu_state_name),
+			 "%s", spdk_hot_upgrade_state_str(state));
+		msync(g_hu_shared_state, sizeof(*g_hu_shared_state), MS_ASYNC);
+	}
 }
 
 enum spdk_hot_upgrade_state
@@ -109,6 +119,12 @@ spdk_hot_upgrade_get_state(void)
 {
 	/* C-4/C-5: Atomic load with acquire semantics */
 	return __atomic_load_n(&g_hu_state, __ATOMIC_ACQUIRE);
+}
+
+struct spdk_hot_upgrade_shared_state *
+spdk_hot_upgrade_get_shared_state(void)
+{
+	return g_hu_shared_state;
 }
 
 bool
@@ -397,6 +413,13 @@ spdk_hot_upgrade_state_save(struct spdk_hot_upgrade_shared_state *state)
 		return -errno;
 	}
 	memcpy(g_hu_shared_state, state, sizeof(*state));
+
+	/* Initialize real-time status fields for external process visibility */
+	g_hu_shared_state->hu_state = (uint32_t)__atomic_load_n(&g_hu_state, __ATOMIC_ACQUIRE);
+	g_hu_shared_state->hu_state_pid = (uint32_t)getpid();
+	snprintf(g_hu_shared_state->hu_state_name,
+		 sizeof(g_hu_shared_state->hu_state_name), "%s",
+		 spdk_hot_upgrade_state_str(__atomic_load_n(&g_hu_state, __ATOMIC_ACQUIRE)));
 
 	if (msync(g_hu_shared_state, sizeof(*state), MS_SYNC) != 0) {
 		SPDK_ERRLOG("Failed to msync state file: %s\n", spdk_strerror(errno));
